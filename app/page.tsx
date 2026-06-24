@@ -149,6 +149,10 @@ function canStudentEdit(status: SubmissionStatus) {
   return status === "writing" || status === "ai-reviewed" || status === "revision-opened" || status === "teacher-reviewed";
 }
 
+function visibleAiFeedback(feedback: AiFeedback[] = []) {
+  return feedback.filter((item) => item.type === "맞춤법" || item.type === "문장");
+}
+
 export default function Home() {
   const [view, setView] = useState<"student" | "teacher">("student");
   const [teacherUnlocked, setTeacherUnlocked] = useState(false);
@@ -452,6 +456,7 @@ function dedupeSubmissions(items: Submission[]) {
   items.forEach((item) => {
     const normalized: Submission = {
       ...item,
+      aiFeedback: visibleAiFeedback(item.aiFeedback ?? []),
       teacherFeedbacks: item.teacherFeedbacks ?? [],
       status: item.status ?? "writing"
     };
@@ -671,7 +676,7 @@ function StudentView({
               <pre className="student-readonly">{currentSubmission?.originalText || "원문이 없습니다."}</pre>
               <h2>AI 피드백</h2>
               <div className="feedback-list">
-                {currentSubmission?.aiFeedback.map((item, index) => (
+                {visibleAiFeedback(currentSubmission?.aiFeedback).map((item, index) => (
                   <article key={`${item.type}-${index}`} className="feedback-item">
                     <strong>{item.type}</strong>
                     <p>{item.message}</p>
@@ -833,6 +838,18 @@ function TeacherDashboard({
   onDeleteSubmission: (id: string) => void;
   onSaveFeedback: (id: string, feedback: string, action: TeacherFeedback["action"]) => void;
 }) {
+  const [editingAssignment, setEditingAssignment] = useState<Assignment | null>(null);
+
+  const updateEditingAssignment = (patch: Partial<Assignment>) => {
+    setEditingAssignment((current) => (current ? { ...current, ...patch } : current));
+  };
+
+  const saveEditingAssignment = () => {
+    if (!editingAssignment) return;
+    onUpdateAssignment(editingAssignment.id, editingAssignment);
+    setEditingAssignment(null);
+  };
+
   return (
     <section className="teacher-page">
       <header className="teacher-header">
@@ -951,72 +968,20 @@ function TeacherDashboard({
         <h2>과제 관리</h2>
         {assignments.map((assignment) => (
           <article key={assignment.id} className={assignment.active ? "assignment active" : "assignment"}>
-            <div className="assignment-fields">
-              <label>
-                과제명
-                <input
-                  value={assignment.title}
-                  onChange={(event) => onUpdateAssignment(assignment.id, { title: event.target.value })}
-                />
-              </label>
-              <label>
-                글쓰기 주제
-                <input
-                  value={assignment.topic}
-                  onChange={(event) => onUpdateAssignment(assignment.id, { topic: event.target.value })}
-                />
-              </label>
-              <div className="assignment-number-grid">
-                <label>
-                  제한 시간
-                  <input
-                    type="number"
-                    min={1}
-                    value={assignment.timeLimit}
-                    onChange={(event) =>
-                      onUpdateAssignment(assignment.id, { timeLimit: Number(event.target.value) })
-                    }
-                  />
-                </label>
-                <label>
-                  최소 글자수
-                  <input
-                    type="number"
-                    min={0}
-                    value={assignment.minChars}
-                    onChange={(event) =>
-                      onUpdateAssignment(assignment.id, { minChars: Number(event.target.value) })
-                    }
-                  />
-                </label>
-                <label>
-                  기준 글자수
-                  <input
-                    type="number"
-                    min={0}
-                    value={assignment.targetChars}
-                    onChange={(event) =>
-                      onUpdateAssignment(assignment.id, { targetChars: Number(event.target.value) })
-                    }
-                  />
-                </label>
-                <label>
-                  최대 글자수
-                  <input
-                    type="number"
-                    min={1}
-                    value={assignment.maxChars}
-                    onChange={(event) =>
-                      onUpdateAssignment(assignment.id, { maxChars: Number(event.target.value) })
-                    }
-                  />
-                </label>
-              </div>
+            <div>
+              <strong>{assignment.title}</strong>
+              <p>
+                주제: {assignment.topic} / 제한: {assignment.timeLimit}분 /{" "}
+                {assignment.minChars.toLocaleString()}자 ~ {assignment.maxChars.toLocaleString()}자
+              </p>
             </div>
             <div className="assignment-actions">
               <button className="outline-button" onClick={() => onSetActiveAssignment(assignment.id)}>
                 {assignment.active ? <Check size={16} /> : <UserRound size={16} />}
                 {assignment.active ? "현재 과제" : "현재 과제로 설정"}
+              </button>
+              <button className="outline-button" onClick={() => setEditingAssignment(assignment)}>
+                <Pencil size={16} /> 수정
               </button>
               <button className="danger-mini" onClick={() => onDeleteAssignment(assignment.id)}>
                 <Trash2 size={14} /> 삭제
@@ -1029,6 +994,81 @@ function TeacherDashboard({
         </button>
         <p className="storage-note">현재 저장된 제출: {allSubmissions.length}건</p>
       </section>
+
+      {editingAssignment && (
+        <section className="modal-backdrop" role="dialog" aria-modal="true" aria-label="과제 수정">
+          <div className="assignment-modal">
+            <header>
+              <h2>과제 수정</h2>
+              <button className="link-button" onClick={() => setEditingAssignment(null)}>
+                닫기
+              </button>
+            </header>
+            <div className="assignment-fields">
+              <label>
+                과제명
+                <input
+                  value={editingAssignment.title}
+                  onChange={(event) => updateEditingAssignment({ title: event.target.value })}
+                />
+              </label>
+              <label>
+                글쓰기 주제
+                <input
+                  value={editingAssignment.topic}
+                  onChange={(event) => updateEditingAssignment({ topic: event.target.value })}
+                />
+              </label>
+              <div className="assignment-number-grid">
+                <label>
+                  제한 시간
+                  <input
+                    type="number"
+                    min={1}
+                    value={editingAssignment.timeLimit}
+                    onChange={(event) => updateEditingAssignment({ timeLimit: Number(event.target.value) })}
+                  />
+                </label>
+                <label>
+                  최소 글자수
+                  <input
+                    type="number"
+                    min={0}
+                    value={editingAssignment.minChars}
+                    onChange={(event) => updateEditingAssignment({ minChars: Number(event.target.value) })}
+                  />
+                </label>
+                <label>
+                  기준 글자수
+                  <input
+                    type="number"
+                    min={0}
+                    value={editingAssignment.targetChars}
+                    onChange={(event) => updateEditingAssignment({ targetChars: Number(event.target.value) })}
+                  />
+                </label>
+                <label>
+                  최대 글자수
+                  <input
+                    type="number"
+                    min={1}
+                    value={editingAssignment.maxChars}
+                    onChange={(event) => updateEditingAssignment({ maxChars: Number(event.target.value) })}
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="outline-button" onClick={() => setEditingAssignment(null)}>
+                취소
+              </button>
+              <button className="primary-button" onClick={saveEditingAssignment}>
+                <Save size={18} /> 저장
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
     </section>
   );
 }
@@ -1059,7 +1099,7 @@ function SubmissionDetail({
           <h3>
             <Sparkles size={18} /> AI 피드백
           </h3>
-          {submission.aiFeedback.map((item, index) => (
+          {visibleAiFeedback(submission.aiFeedback).map((item, index) => (
             <article key={index} className="feedback-item">
               <strong>{item.type}</strong>
               <p>{item.message}</p>

@@ -706,7 +706,7 @@ pre {
 .assignment {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
+  align-items: center;
   gap: 18px;
   border: 1px solid #dbe4f0;
   border-radius: 8px;
@@ -752,8 +752,52 @@ pre {
 
 .assignment-actions {
   display: grid;
+  grid-template-columns: 1fr;
   gap: 8px;
   min-width: 166px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgba(13, 27, 52, 0.42);
+  padding: 18px;
+}
+
+.assignment-modal {
+  width: min(680px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: var(--shadow);
+  padding: 22px;
+}
+
+.assignment-modal header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.assignment-modal h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.modal-actions .primary-button {
+  grid-column: auto;
 }
 
 .assignment-panel > .outline-button {
