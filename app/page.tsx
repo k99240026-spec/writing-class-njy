@@ -15,7 +15,7 @@ import {
   Trash2,
   UserRound
 } from "lucide-react";
-import type { Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
+import type { ClipboardEvent, Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
 import { useEffect, useMemo, useState } from "react";
 
 type Assignment = {
@@ -35,6 +35,21 @@ type AiFeedback = {
   suggestion: string;
 };
 
+type TeacherFeedback = {
+  id: string;
+  text: string;
+  createdAt: string;
+  action: "revision-opened" | "feedback-complete" | "final-closed";
+};
+
+type SubmissionStatus =
+  | "writing"
+  | "ai-reviewed"
+  | "submitted"
+  | "revision-opened"
+  | "teacher-reviewed"
+  | "final-closed";
+
 type Submission = {
   id: string;
   assignmentId: string;
@@ -46,10 +61,12 @@ type Submission = {
   revisedText: string;
   aiFeedback: AiFeedback[];
   teacherFeedback: string;
+  teacherFeedbacks?: TeacherFeedback[];
   startedAt: string;
   aiCheckedAt?: string;
   submittedAt?: string;
-  status: "writing" | "ai-reviewed" | "submitted" | "teacher-reviewed";
+  lastEditedAt?: string;
+  status: SubmissionStatus;
 };
 
 const initialAssignments: Assignment[] = [
@@ -87,8 +104,12 @@ const emptyDraft = {
   revisedText: ""
 };
 
+function nowIso() {
+  return new Date().toISOString();
+}
+
 function nowKst() {
-  return formatKst(new Date().toISOString());
+  return formatKst(nowIso());
 }
 
 function formatKst(value: string) {
@@ -104,8 +125,8 @@ function formatKst(value: string) {
   }).format(new Date(value));
 }
 
-function elapsed(startedAt: string) {
-  const seconds = Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
+function elapsed(startedAt: string, now = Date.now()) {
+  const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000));
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
   return `${minutes}분 ${rest}초`;
@@ -115,13 +136,26 @@ function countChars(text: string) {
   return text.replace(/\s/g, "").length;
 }
 
+function studentKey(submission: Pick<Submission, "assignmentId" | "className" | "studentNumber" | "studentName">) {
+  return [
+    submission.assignmentId,
+    submission.className.trim(),
+    submission.studentNumber.trim(),
+    submission.studentName.trim()
+  ].join("|");
+}
+
+function canStudentEdit(status: SubmissionStatus) {
+  return status === "writing" || status === "ai-reviewed" || status === "revision-opened" || status === "teacher-reviewed";
+}
+
 export default function Home() {
   const [view, setView] = useState<"student" | "teacher">("student");
   const [teacherUnlocked, setTeacherUnlocked] = useState(false);
   const [assignments, setAssignments] = useState<Assignment[]>(initialAssignments);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [draft, setDraft] = useState(emptyDraft);
-  const [phase, setPhase] = useState<"intro" | "writing" | "revision">("intro");
+  const [phase, setPhase] = useState<"intro" | "writing" | "revision" | "submitted">("intro");
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState("all");
@@ -137,7 +171,7 @@ export default function Home() {
       // localStorage is the app's current persistence layer, so the initial client sync is intentional.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setAssignments(parsed.assignments?.length ? parsed.assignments : initialAssignments);
-      setSubmissions(parsed.submissions ?? []);
+      setSubmissions(dedupeSubmissions(parsed.submissions ?? []));
     } catch {
       window.localStorage.removeItem(storageKey);
     }
@@ -161,30 +195,59 @@ export default function Home() {
 
   const startWriting = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const normalized = {
+      assignmentId: activeAssignment.id,
+      className: draft.className.trim(),
+      studentNumber: draft.studentNumber.trim(),
+      studentName: draft.studentName.trim()
+    };
+    const key = studentKey(normalized);
+    const existing = submissions.find((submission) => studentKey(submission) === key);
+
+    if (existing) {
+      setCurrentId(existing.id);
+      setDraft({
+        className: existing.className,
+        studentNumber: existing.studentNumber,
+        studentName: existing.studentName,
+        title: existing.title,
+        text: existing.originalText,
+        revisedText: existing.revisedText || existing.originalText
+      });
+      if (existing.status === "submitted" || existing.status === "final-closed") {
+        setPhase("submitted");
+      } else if (existing.status === "writing") {
+        setPhase("writing");
+      } else {
+        setPhase("revision");
+      }
+      return;
+    }
+
     const id = crypto.randomUUID();
     const submission: Submission = {
       id,
-      assignmentId: activeAssignment.id,
-      className: draft.className,
-      studentNumber: draft.studentNumber,
-      studentName: draft.studentName,
+      ...normalized,
       title: "",
       originalText: "",
       revisedText: "",
       aiFeedback: [],
       teacherFeedback: "",
-      startedAt: new Date().toISOString(),
+      teacherFeedbacks: [],
+      startedAt: nowIso(),
+      lastEditedAt: nowIso(),
       status: "writing"
     };
     setSubmissions((items) => [submission, ...items]);
     setCurrentId(id);
+    setDraft((prev) => ({ ...prev, ...normalized }));
     setPhase("writing");
   };
 
   const updateCurrent = (patch: Partial<Submission>) => {
     if (!currentId) return;
     setSubmissions((items) =>
-      items.map((item) => (item.id === currentId ? { ...item, ...patch } : item))
+      items.map((item) => (item.id === currentId ? { ...item, ...patch, lastEditedAt: nowIso() } : item))
     );
   };
 
@@ -205,21 +268,27 @@ export default function Home() {
     const data = await response.json();
     updateCurrent({
       aiFeedback: data.feedback ?? [],
-      aiCheckedAt: new Date().toISOString(),
-      revisedText: draft.text,
+      aiCheckedAt: nowIso(),
+      revisedText: draft.revisedText || draft.text,
       status: "ai-reviewed"
     });
-    setDraft((prev) => ({ ...prev, revisedText: prev.text }));
+    setDraft((prev) => ({ ...prev, revisedText: prev.revisedText || prev.text }));
     setPhase("revision");
     setFeedbackLoading(false);
   };
 
   const submitToTeacher = () => {
     updateCurrent({
+      title: draft.title,
       revisedText: draft.revisedText,
-      submittedAt: new Date().toISOString(),
+      submittedAt: nowIso(),
       status: "submitted"
     });
+    window.alert("제출되었습니다.");
+    setPhase("submitted");
+  };
+
+  const exitStudent = () => {
     setDraft(emptyDraft);
     setCurrentId(null);
     setPhase("intro");
@@ -251,11 +320,30 @@ export default function Home() {
     ]);
   };
 
-  const saveTeacherFeedback = (id: string, feedback: string) => {
+  const saveTeacherFeedback = (id: string, feedback: string, action: TeacherFeedback["action"]) => {
     setSubmissions((items) =>
-      items.map((item) =>
-        item.id === id ? { ...item, teacherFeedback: feedback, status: "teacher-reviewed" } : item
-      )
+      items.map((item) => {
+        if (item.id !== id) return item;
+        const entry: TeacherFeedback = {
+          id: crypto.randomUUID(),
+          text: feedback,
+          createdAt: nowIso(),
+          action
+        };
+        const nextStatus: SubmissionStatus =
+          action === "final-closed"
+            ? "final-closed"
+            : action === "revision-opened"
+              ? "revision-opened"
+              : "teacher-reviewed";
+        return {
+          ...item,
+          teacherFeedback: feedback,
+          teacherFeedbacks: [...(item.teacherFeedbacks ?? []), entry],
+          status: nextStatus,
+          lastEditedAt: nowIso()
+        };
+      })
     );
   };
 
@@ -285,6 +373,9 @@ export default function Home() {
           onStart={startWriting}
           onAiFeedback={requestAiFeedback}
           onSubmit={submitToTeacher}
+          onExit={exitStudent}
+          onResumeRevision={() => setPhase("revision")}
+          onSaveDraft={updateCurrent}
           feedbackLoading={feedbackLoading}
         />
       ) : teacherUnlocked ? (
@@ -314,6 +405,23 @@ export default function Home() {
   );
 }
 
+function dedupeSubmissions(items: Submission[]) {
+  const byStudent = new Map<string, Submission>();
+  items.forEach((item) => {
+    const normalized: Submission = {
+      ...item,
+      teacherFeedbacks: item.teacherFeedbacks ?? [],
+      status: item.status ?? "writing"
+    };
+    const key = studentKey(normalized);
+    const previous = byStudent.get(key);
+    if (!previous || new Date(normalized.lastEditedAt ?? normalized.startedAt) > new Date(previous.lastEditedAt ?? previous.startedAt)) {
+      byStudent.set(key, normalized);
+    }
+  });
+  return Array.from(byStudent.values());
+}
+
 function StudentView({
   assignment,
   draft,
@@ -323,25 +431,50 @@ function StudentView({
   onStart,
   onAiFeedback,
   onSubmit,
+  onExit,
+  onResumeRevision,
+  onSaveDraft,
   feedbackLoading
 }: {
   assignment: Assignment;
   draft: typeof emptyDraft;
   setDraft: Dispatch<SetStateAction<typeof emptyDraft>>;
-  phase: "intro" | "writing" | "revision";
+  phase: "intro" | "writing" | "revision" | "submitted";
   currentSubmission?: Submission;
   onStart: (event: FormEvent<HTMLFormElement>) => void;
   onAiFeedback: () => void;
   onSubmit: () => void;
+  onExit: () => void;
+  onResumeRevision: () => void;
+  onSaveDraft: (patch: Partial<Submission>) => void;
   feedbackLoading: boolean;
 }) {
+  const [timerNow, setTimerNow] = useState(0);
   const charCount = countChars(phase === "revision" ? draft.revisedText : draft.text);
   const progress = Math.min(100, Math.round((charCount / assignment.maxChars) * 100));
+  const locked = currentSubmission?.status === "final-closed";
+  const editable = currentSubmission ? canStudentEdit(currentSubmission.status) : true;
+  const timerDisplayNow = timerNow || (currentSubmission ? new Date(currentSubmission.startedAt).getTime() : 0);
+
+  useEffect(() => {
+    if (phase === "intro") return;
+    const timer = window.setInterval(() => setTimerNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [phase]);
+
+  const blockClipboard = (event: ClipboardEvent<HTMLElement>) => {
+    event.preventDefault();
+  };
 
   if (phase === "intro") {
     return (
       <section className="student-intro">
-        <h1>글쓰기 수행평가 안내</h1>
+        <h1>노지연 샘과 함께 하는 글쓰기 수업</h1>
+        <p className="intro-copy">
+          글은 생각과 인격을 비추는 거울입니다.
+          <br />
+          정교한 문장으로 지혜를 가꾸는 글쓰기 수업에 여러분을 초대합니다.
+        </p>
         <div className="notice primary">
           <strong>
             <FileText size={16} /> 과제 안내
@@ -352,11 +485,6 @@ function StudentView({
             {assignment.minChars.toLocaleString()}자, 최대 {assignment.maxChars.toLocaleString()}자
           </p>
           <p>제한 시간: {assignment.timeLimit}분</p>
-        </div>
-        <div className="notice warning">
-          <strong>주의 사항</strong>
-          <p>생성형 AI를 활용하여 작성할 경우 채점에서 불이익이 있을 수 있습니다.</p>
-          <p>글쓰기 과정에서 복사하기, 붙여넣기는 금지됩니다.</p>
         </div>
         <form className="start-panel" onSubmit={onStart}>
           <label>
@@ -402,8 +530,22 @@ function StudentView({
     );
   }
 
+  if (phase === "submitted") {
+    return (
+      <SubmittedView
+        assignment={assignment}
+        submission={currentSubmission}
+        draft={draft}
+        locked={locked}
+        editable={editable}
+        onResumeRevision={onResumeRevision}
+        onExit={onExit}
+      />
+    );
+  }
+
   return (
-    <section className="writing-shell">
+    <section className="writing-shell" onCopy={blockClipboard} onCut={blockClipboard} onPaste={blockClipboard}>
       <aside className="writing-sidebar">
         <Panel title="과제 안내">
           <p className="eyebrow">주제</p>
@@ -432,7 +574,7 @@ function StudentView({
         <Panel title="경과 시간">
           <div className="timer">
             <Clock size={22} />
-            {currentSubmission ? elapsed(currentSubmission.startedAt) : "0분 0초"}
+            {currentSubmission ? elapsed(currentSubmission.startedAt, timerDisplayNow) : "0분 0초"}
           </div>
           <p className="small">제한: {assignment.timeLimit}분</p>
         </Panel>
@@ -442,8 +584,13 @@ function StudentView({
         <input
           className="title-input"
           value={draft.title}
-          onChange={(event) => setDraft((prev) => ({ ...prev, title: event.target.value }))}
+          onChange={(event) => {
+            setDraft((prev) => ({ ...prev, title: event.target.value }));
+            onSaveDraft({ title: event.target.value });
+          }}
+          onPaste={blockClipboard}
           placeholder="제목을 입력하세요"
+          disabled={!editable}
         />
         <p className="student-meta">
           {draft.className} &nbsp; 학번: {draft.studentNumber} &nbsp; 이름: {draft.studentName}
@@ -454,7 +601,13 @@ function StudentView({
             <textarea
               className="essay-input"
               value={draft.text}
-              onChange={(event) => setDraft((prev) => ({ ...prev, text: event.target.value }))}
+              onChange={(event) => {
+                setDraft((prev) => ({ ...prev, text: event.target.value }));
+                onSaveDraft({ originalText: event.target.value });
+              }}
+              onPaste={blockClipboard}
+              onCopy={blockClipboard}
+              onCut={blockClipboard}
               placeholder="여기에 초안을 작성하세요."
             />
             <div className="bottom-bar">
@@ -472,6 +625,8 @@ function StudentView({
         ) : (
           <div className="revision-grid">
             <div>
+              <h2>원문</h2>
+              <pre className="student-readonly">{currentSubmission?.originalText || "원문이 없습니다."}</pre>
               <h2>AI 피드백</h2>
               <div className="feedback-list">
                 {currentSubmission?.aiFeedback.map((item, index) => (
@@ -482,23 +637,82 @@ function StudentView({
                   </article>
                 ))}
               </div>
+              <TeacherFeedbackList submission={currentSubmission} />
             </div>
             <div>
               <h2>수정본</h2>
               <textarea
                 className="essay-input compact"
                 value={draft.revisedText}
-                onChange={(event) =>
-                  setDraft((prev) => ({ ...prev, revisedText: event.target.value }))
-                }
+                disabled={!editable}
+                onChange={(event) => {
+                  setDraft((prev) => ({ ...prev, revisedText: event.target.value }));
+                  onSaveDraft({ revisedText: event.target.value });
+                }}
+                onPaste={blockClipboard}
+                onCopy={blockClipboard}
+                onCut={blockClipboard}
               />
-              <button className="success-button full" type="button" onClick={onSubmit}>
+              <button className="success-button full" type="button" onClick={onSubmit} disabled={!editable}>
                 <Send size={18} /> 교사에게 제출
               </button>
             </div>
           </div>
         )}
       </section>
+    </section>
+  );
+}
+
+function SubmittedView({
+  submission,
+  draft,
+  locked,
+  editable,
+  onResumeRevision,
+  onExit,
+}: {
+  assignment: Assignment;
+  submission?: Submission;
+  draft: typeof emptyDraft;
+  locked: boolean;
+  editable: boolean;
+  onResumeRevision: () => void;
+  onExit: () => void;
+}) {
+  return (
+    <section className="submitted-page">
+      <div className="submitted-panel">
+        <Check size={34} />
+        <h1>{locked ? "최종 마감되었습니다." : "제출되었습니다."}</h1>
+        <p>
+          {locked
+            ? "교사가 최종 마감을 눌러 더 이상 수정할 수 없습니다."
+            : editable
+              ? "교사 피드백이 도착했습니다. 수정본을 다시 작성할 수 있습니다."
+              : "교사가 확인할 때까지 이 화면에 머물 수 있습니다."}
+        </p>
+        <div className="submitted-actions">
+          {editable && !locked && (
+            <button className="success-button" onClick={onResumeRevision}>
+              <Pencil size={18} /> 다시 수정하기
+            </button>
+          )}
+          <button className="outline-button" onClick={onExit}>
+            나가기
+          </button>
+        </div>
+      </div>
+      <div className="submitted-grid">
+        <ReadOnlyBlock title="원문" text={submission?.originalText ?? draft.text} icon={<FileText />} />
+        <ReadOnlyBlock title="수정본" text={submission?.revisedText ?? draft.revisedText} icon={<Pencil />} />
+        <section className="read-block">
+          <h3>
+            <MessageSquareText size={18} /> 교사 피드백
+          </h3>
+          <TeacherFeedbackList submission={submission} />
+        </section>
+      </div>
     </section>
   );
 }
@@ -571,7 +785,7 @@ function TeacherDashboard({
   onSetActiveAssignment: (id: string) => void;
   onAddAssignment: () => void;
   onDeleteSubmission: (id: string) => void;
-  onSaveFeedback: (id: string, feedback: string) => void;
+  onSaveFeedback: (id: string, feedback: string, action: TeacherFeedback["action"]) => void;
 }) {
   return (
     <section className="teacher-page">
@@ -718,7 +932,7 @@ function SubmissionDetail({
   onSaveFeedback
 }: {
   submission: Submission;
-  onSaveFeedback: (id: string, feedback: string) => void;
+  onSaveFeedback: (id: string, feedback: string, action: TeacherFeedback["action"]) => void;
 }) {
   const [feedbackDraft, setFeedbackDraft] = useState(submission.teacherFeedback);
 
@@ -757,21 +971,64 @@ function SubmissionDetail({
             onChange={(event) => setFeedbackDraft(event.target.value)}
             placeholder="교사 피드백을 입력하세요."
           />
-          <button className="primary-button" onClick={() => onSaveFeedback(submission.id, feedbackDraft)}>
-            <Save size={18} /> 저장
-          </button>
+          <div className="teacher-action-row">
+            <button
+              className="outline-button"
+              onClick={() => onSaveFeedback(submission.id, feedbackDraft, "revision-opened")}
+            >
+              <Pencil size={18} /> 수정 가능
+            </button>
+            <button
+              className="primary-button"
+              onClick={() => onSaveFeedback(submission.id, feedbackDraft, "feedback-complete")}
+            >
+              <Save size={18} /> 피드백 완료
+            </button>
+            <button
+              className="danger-button"
+              onClick={() => onSaveFeedback(submission.id, feedbackDraft, "final-closed")}
+            >
+              <Lock size={18} /> 최종 마감
+            </button>
+          </div>
+          <TeacherFeedbackList submission={submission} />
         </section>
       </div>
     </section>
   );
 }
 
-function StatusBadge({ status }: { status: Submission["status"] }) {
-  const labels = {
+function TeacherFeedbackList({ submission }: { submission?: Submission }) {
+  const feedbacks = submission?.teacherFeedbacks ?? [];
+  if (feedbacks.length === 0 && !submission?.teacherFeedback) {
+    return <p className="small">아직 교사 피드백이 없습니다.</p>;
+  }
+  return (
+    <div className="teacher-feedback-list">
+      {feedbacks.map((feedback) => (
+        <article key={feedback.id} className="teacher-feedback-item">
+          <strong>{formatKst(feedback.createdAt)}</strong>
+          <p>{feedback.text || "피드백 내용이 없습니다."}</p>
+        </article>
+      ))}
+      {feedbacks.length === 0 && submission?.teacherFeedback && (
+        <article className="teacher-feedback-item">
+          <strong>최근 피드백</strong>
+          <p>{submission.teacherFeedback}</p>
+        </article>
+      )}
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: SubmissionStatus }) {
+  const labels: Record<SubmissionStatus, string> = {
     writing: "작성 중",
     "ai-reviewed": "AI 확인",
     submitted: "제출 완료",
-    "teacher-reviewed": "교사 확인"
+    "revision-opened": "수정 가능",
+    "teacher-reviewed": "피드백 완료",
+    "final-closed": "최종 마감"
   };
   return <span className={`status ${status}`}>{labels[status]}</span>;
 }
