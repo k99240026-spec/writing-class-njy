@@ -19,6 +19,12 @@ type FeedbackItem = {
 
 const feedbackTypes = new Set(["맞춤법", "문장"]);
 
+function getOpenAiApiKey() {
+  const key = process.env.OPENAI_API_KEY?.trim().replace(/^["']|["']$/g, "");
+  if (!key || !key.startsWith("sk-") || !/^[\x00-\x7F]+$/.test(key)) return null;
+  return key;
+}
+
 const fallbackFeedback = (text: string): FeedbackItem[] => {
   const trimmed = text.trim();
   const sentences = trimmed.split(/[.!?。！？\n]+/).filter(Boolean);
@@ -74,7 +80,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "검사할 글이 없습니다." }, { status: 400 });
   }
 
-  if (!process.env.OPENAI_API_KEY) {
+  const apiKey = getOpenAiApiKey();
+
+  if (!apiKey) {
     return NextResponse.json({ feedback: fallbackFeedback(text), source: "fallback" });
   }
 
@@ -100,7 +108,7 @@ export async function POST(request: Request) {
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
