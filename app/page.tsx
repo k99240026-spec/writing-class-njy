@@ -303,6 +303,46 @@ export default function Home() {
     setAssignments((items) => items.map((item) => ({ ...item, active: item.id === id })));
   };
 
+  const updateAssignment = (id: string, patch: Partial<Assignment>) => {
+    setAssignments((items) =>
+      items.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              ...patch,
+              timeLimit: Math.max(1, Number(patch.timeLimit ?? item.timeLimit)),
+              minChars: Math.max(0, Number(patch.minChars ?? item.minChars)),
+              targetChars: Math.max(0, Number(patch.targetChars ?? item.targetChars)),
+              maxChars: Math.max(1, Number(patch.maxChars ?? item.maxChars))
+            }
+          : item
+      )
+    );
+  };
+
+  const deleteAssignment = (id: string) => {
+    if (assignments.length <= 1) {
+      window.alert("과제는 최소 1개 이상 필요합니다.");
+      return;
+    }
+
+    const hasSubmissions = submissions.some((submission) => submission.assignmentId === id);
+    if (hasSubmissions && !window.confirm("이 과제로 제출된 글이 있습니다. 과제를 삭제해도 제출 기록은 남습니다. 삭제할까요?")) {
+      return;
+    }
+
+    setAssignments((items) => {
+      const deleted = items.find((item) => item.id === id);
+      const remaining = items.filter((item) => item.id !== id);
+      if (deleted?.active && remaining.length > 0) {
+        return remaining.map((item, index) => ({ ...item, active: index === 0 }));
+      }
+      return remaining;
+    });
+
+    if (selectedAssignment === id) setSelectedAssignment("all");
+  };
+
   const addAssignment = () => {
     const id = crypto.randomUUID();
     setAssignments((items) => [
@@ -390,6 +430,8 @@ export default function Home() {
           onClassFilter={setSelectedClass}
           onSelect={setSelectedSubmissionId}
           onSetActiveAssignment={setActiveAssignment}
+          onUpdateAssignment={updateAssignment}
+          onDeleteAssignment={deleteAssignment}
           onAddAssignment={addAssignment}
           onDeleteSubmission={deleteSubmission}
           onSaveFeedback={saveTeacherFeedback}
@@ -769,6 +811,8 @@ function TeacherDashboard({
   onClassFilter,
   onSelect,
   onSetActiveAssignment,
+  onUpdateAssignment,
+  onDeleteAssignment,
   onAddAssignment,
   onDeleteSubmission,
   onSaveFeedback
@@ -783,6 +827,8 @@ function TeacherDashboard({
   onClassFilter: (className: string) => void;
   onSelect: (id: string) => void;
   onSetActiveAssignment: (id: string) => void;
+  onUpdateAssignment: (id: string, patch: Partial<Assignment>) => void;
+  onDeleteAssignment: (id: string) => void;
   onAddAssignment: () => void;
   onDeleteSubmission: (id: string) => void;
   onSaveFeedback: (id: string, feedback: string, action: TeacherFeedback["action"]) => void;
@@ -905,17 +951,77 @@ function TeacherDashboard({
         <h2>과제 관리</h2>
         {assignments.map((assignment) => (
           <article key={assignment.id} className={assignment.active ? "assignment active" : "assignment"}>
-            <div>
-              <strong>{assignment.title}</strong>
-              <p>
-                주제: {assignment.topic} / 제한: {assignment.timeLimit}분 /{" "}
-                {assignment.minChars.toLocaleString()}자 ~ {assignment.maxChars.toLocaleString()}자
-              </p>
+            <div className="assignment-fields">
+              <label>
+                과제명
+                <input
+                  value={assignment.title}
+                  onChange={(event) => onUpdateAssignment(assignment.id, { title: event.target.value })}
+                />
+              </label>
+              <label>
+                글쓰기 주제
+                <input
+                  value={assignment.topic}
+                  onChange={(event) => onUpdateAssignment(assignment.id, { topic: event.target.value })}
+                />
+              </label>
+              <div className="assignment-number-grid">
+                <label>
+                  제한 시간
+                  <input
+                    type="number"
+                    min={1}
+                    value={assignment.timeLimit}
+                    onChange={(event) =>
+                      onUpdateAssignment(assignment.id, { timeLimit: Number(event.target.value) })
+                    }
+                  />
+                </label>
+                <label>
+                  최소 글자수
+                  <input
+                    type="number"
+                    min={0}
+                    value={assignment.minChars}
+                    onChange={(event) =>
+                      onUpdateAssignment(assignment.id, { minChars: Number(event.target.value) })
+                    }
+                  />
+                </label>
+                <label>
+                  기준 글자수
+                  <input
+                    type="number"
+                    min={0}
+                    value={assignment.targetChars}
+                    onChange={(event) =>
+                      onUpdateAssignment(assignment.id, { targetChars: Number(event.target.value) })
+                    }
+                  />
+                </label>
+                <label>
+                  최대 글자수
+                  <input
+                    type="number"
+                    min={1}
+                    value={assignment.maxChars}
+                    onChange={(event) =>
+                      onUpdateAssignment(assignment.id, { maxChars: Number(event.target.value) })
+                    }
+                  />
+                </label>
+              </div>
             </div>
-            <button className="outline-button" onClick={() => onSetActiveAssignment(assignment.id)}>
-              {assignment.active ? <Check size={16} /> : <UserRound size={16} />}
-              {assignment.active ? "현재 과제" : "현재 과제로 설정"}
-            </button>
+            <div className="assignment-actions">
+              <button className="outline-button" onClick={() => onSetActiveAssignment(assignment.id)}>
+                {assignment.active ? <Check size={16} /> : <UserRound size={16} />}
+                {assignment.active ? "현재 과제" : "현재 과제로 설정"}
+              </button>
+              <button className="danger-mini" onClick={() => onDeleteAssignment(assignment.id)}>
+                <Trash2 size={14} /> 삭제
+              </button>
+            </div>
           </article>
         ))}
         <button className="outline-button" onClick={onAddAssignment}>

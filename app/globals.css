@@ -704,9 +704,9 @@ pre {
 }
 
 .assignment {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
   gap: 18px;
   border: 1px solid #dbe4f0;
   border-radius: 8px;
@@ -727,6 +727,33 @@ pre {
   margin: 6px 0 0;
   color: #5f6e83;
   font-size: 13px;
+}
+
+.assignment-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.assignment-fields label {
+  gap: 6px;
+  color: #344158;
+  font-size: 13px;
+}
+
+.assignment-fields input {
+  min-height: 38px;
+}
+
+.assignment-number-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(110px, 1fr));
+  gap: 10px;
+}
+
+.assignment-actions {
+  display: grid;
+  gap: 8px;
+  min-width: 166px;
 }
 
 .assignment-panel > .outline-button {
@@ -766,6 +793,10 @@ pre {
     align-items: stretch;
     grid-template-columns: 1fr;
     flex-direction: column;
+  }
+
+  .assignment-number-grid {
+    grid-template-columns: 1fr 1fr;
   }
 
   .filter-row span {
