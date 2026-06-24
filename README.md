@@ -11,7 +11,7 @@ npm run dev
 
 ## AI 피드백 설정
 
-Vercel 환경변수에 `OPENAI_API_KEY`를 추가하면 `/api/ai-feedback` 라우트가 OpenAI API로 맞춤법, 비문, 구성 피드백을 생성합니다.
+Vercel 환경변수에 `OPENAI_API_KEY`를 추가하면 `/api/ai-feedback` 라우트가 OpenAI API로 맞춤법, 띄어쓰기, 문장 비문 피드백을 생성합니다.
 
 환경변수가 없으면 화면 검증을 위한 기본 피드백이 표시됩니다.
 
