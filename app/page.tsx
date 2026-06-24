@@ -60,6 +60,7 @@ type Submission = {
   originalText: string;
   revisedText: string;
   aiFeedback: AiFeedback[];
+  aiFeedbackSource?: "openai" | "fallback";
   teacherFeedback: string;
   teacherFeedbacks?: TeacherFeedback[];
   startedAt: string;
@@ -236,6 +237,7 @@ export default function Home() {
       originalText: "",
       revisedText: "",
       aiFeedback: [],
+      aiFeedbackSource: undefined,
       teacherFeedback: "",
       teacherFeedbacks: [],
       startedAt: nowIso(),
@@ -272,6 +274,7 @@ export default function Home() {
     const data = await response.json();
     updateCurrent({
       aiFeedback: data.feedback ?? [],
+      aiFeedbackSource: data.source === "openai" ? "openai" : "fallback",
       aiCheckedAt: nowIso(),
       revisedText: draft.revisedText || draft.text,
       status: "ai-reviewed"
@@ -675,6 +678,7 @@ function StudentView({
               <h2>원문</h2>
               <pre className="student-readonly">{currentSubmission?.originalText || "원문이 없습니다."}</pre>
               <h2>AI 피드백</h2>
+              <AiFeedbackSourceBadge source={currentSubmission?.aiFeedbackSource} />
               <div className="feedback-list">
                 {visibleAiFeedback(currentSubmission?.aiFeedback).map((item, index) => (
                   <article key={`${item.type}-${index}`} className="feedback-item">
@@ -1099,6 +1103,7 @@ function SubmissionDetail({
           <h3>
             <Sparkles size={18} /> AI 피드백
           </h3>
+          <AiFeedbackSourceBadge source={submission.aiFeedbackSource} />
           {visibleAiFeedback(submission.aiFeedback).map((item, index) => (
             <article key={index} className="feedback-item">
               <strong>{item.type}</strong>
@@ -1141,6 +1146,18 @@ function SubmissionDetail({
         </section>
       </div>
     </section>
+  );
+}
+
+function AiFeedbackSourceBadge({ source }: { source?: Submission["aiFeedbackSource"] }) {
+  if (!source) return null;
+
+  return (
+    <p className={source === "openai" ? "ai-source openai" : "ai-source fallback"}>
+      {source === "openai"
+        ? "실제 OpenAI API로 검사했습니다."
+        : "OpenAI API 키가 연결되지 않아 기본 예시 검사만 표시 중입니다."}
+    </p>
   );
 }
 

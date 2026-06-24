@@ -365,6 +365,24 @@ textarea:focus {
   gap: 10px;
 }
 
+.ai-source {
+  margin: 0 0 10px;
+  border-radius: 7px;
+  padding: 9px 11px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ai-source.openai {
+  background: #dff8e8;
+  color: #08783e;
+}
+
+.ai-source.fallback {
+  background: #fff0c2;
+  color: #955a00;
+}
+
 .feedback-item {
   border: 1px solid #dbe5f2;
   border-radius: 8px;
