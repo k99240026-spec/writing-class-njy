@@ -146,6 +146,10 @@ function studentKey(submission: Pick<Submission, "assignmentId" | "className" | 
   ].join("|");
 }
 
+function createId() {
+  return globalThis.crypto?.randomUUID?.() ?? `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 function canStudentEdit(status: SubmissionStatus) {
   return status === "writing" || status === "ai-reviewed" || status === "revision-opened" || status === "teacher-reviewed";
 }
@@ -200,6 +204,16 @@ export default function Home() {
 
   const startWriting = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!activeAssignment) {
+      window.alert("현재 선택된 과제가 없습니다. 교사 화면에서 현재 과제를 설정해 주세요.");
+      return;
+    }
+
+    if (!draft.className.trim() || !draft.studentNumber.trim() || !draft.studentName.trim()) {
+      window.alert("분반, 학번, 이름을 모두 입력해 주세요.");
+      return;
+    }
+
     const normalized = {
       assignmentId: activeAssignment.id,
       className: draft.className.trim(),
@@ -229,7 +243,7 @@ export default function Home() {
       return;
     }
 
-    const id = crypto.randomUUID();
+    const id = createId();
     const submission: Submission = {
       id,
       ...normalized,
@@ -351,7 +365,7 @@ export default function Home() {
   };
 
   const addAssignment = () => {
-    const id = crypto.randomUUID();
+    const id = createId();
     setAssignments((items) => [
       ...items.map((item) => ({ ...item, active: false })),
       {
@@ -372,7 +386,7 @@ export default function Home() {
       items.map((item) => {
         if (item.id !== id) return item;
         const entry: TeacherFeedback = {
-          id: crypto.randomUUID(),
+          id: createId(),
           text: feedback,
           createdAt: nowIso(),
           action
@@ -536,7 +550,7 @@ function StudentView({
           </p>
           <p>제한 시간: {assignment.timeLimit}분</p>
         </div>
-        <form className="start-panel" onSubmit={onStart}>
+        <form className="start-panel" onSubmit={onStart} noValidate>
           <label>
             분반
             <select
